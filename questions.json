@@ -1,0 +1,230 @@
+{
+  "title": "Graduate Course Enrollment - SQL Quiz",
+  "questions": [
+    {
+      "id": "q1",
+      "title": "Filter and sort",
+      "points": 4,
+      "prompt": "List the name and start_year of every student in the MIDS program. Sort by start_year (oldest first), then by name A to Z.",
+      "skills": "SELECT, WHERE, ORDER BY",
+      "ordered": true,
+      "hint_sql": "SELECT name, start_year\nFROM students\nWHERE program = 'MIDS'\nORDER BY start_year, name;",
+      "expected": {
+        "columns": [
+          "name",
+          "start_year"
+        ],
+        "rows": [
+          [
+            "Ava Chen",
+            2025
+          ],
+          [
+            "Ben Okafor",
+            2025
+          ],
+          [
+            "Hana Sato",
+            2025
+          ],
+          [
+            "Daniel Kim",
+            2026
+          ],
+          [
+            "Farah Haddad",
+            2026
+          ],
+          [
+            "Lina Wang",
+            2026
+          ]
+        ]
+      }
+    },
+    {
+      "id": "q2",
+      "title": "Count per group",
+      "points": 4,
+      "prompt": "How many courses does each department offer? Return department and course_count. Put the largest count first; break ties by department A to Z.",
+      "skills": "GROUP BY, COUNT",
+      "ordered": true,
+      "hint_sql": "SELECT department, COUNT(*) AS course_count\nFROM courses\nGROUP BY department\nORDER BY course_count DESC, department;",
+      "expected": {
+        "columns": [
+          "department",
+          "course_count"
+        ],
+        "rows": [
+          [
+            "IDS",
+            4
+          ],
+          [
+            "CS",
+            2
+          ],
+          [
+            "ENV",
+            2
+          ],
+          [
+            "STA",
+            2
+          ]
+        ]
+      }
+    },
+    {
+      "id": "q3",
+      "title": "Join three tables",
+      "points": 4,
+      "prompt": "Who is enrolled in IDS 706 in Fall 2026? Return each student's name and program, sorted by name A to Z.",
+      "skills": "JOIN (students, enrollments, courses)",
+      "ordered": true,
+      "hint_sql": "SELECT s.name, s.program\nFROM enrollments e\nJOIN students s ON s.student_id = e.student_id\nJOIN courses  c ON c.course_id  = e.course_id\nWHERE c.course_code = 'IDS 706'\n  AND e.term = 'Fall 2026'\nORDER BY s.name;",
+      "expected": {
+        "columns": [
+          "name",
+          "program"
+        ],
+        "rows": [
+          [
+            "Ava Chen",
+            "MIDS"
+          ],
+          [
+            "Ben Okafor",
+            "MIDS"
+          ],
+          [
+            "Daniel Kim",
+            "MIDS"
+          ],
+          [
+            "Farah Haddad",
+            "MIDS"
+          ],
+          [
+            "George Liu",
+            "MEng"
+          ],
+          [
+            "Hana Sato",
+            "MIDS"
+          ],
+          [
+            "Lina Wang",
+            "MIDS"
+          ]
+        ]
+      }
+    },
+    {
+      "id": "q4",
+      "title": "Aggregate with HAVING",
+      "points": 4,
+      "prompt": "Consider only completed enrollments (grade_points is not NULL). Find students who have completed at least 3 courses with an average grade_points of 3.5 or higher. Return name, courses_completed and avg_grade_points rounded to 2 decimals. Sort by avg_grade_points (highest first), then name A to Z.",
+      "skills": "JOIN, GROUP BY, HAVING, ROUND",
+      "ordered": true,
+      "hint_sql": "SELECT s.name,\n       COUNT(*) AS courses_completed,\n       ROUND(AVG(e.grade_points), 2) AS avg_grade_points\nFROM enrollments e\nJOIN students s ON s.student_id = e.student_id\nWHERE e.grade_points IS NOT NULL\nGROUP BY s.student_id, s.name\nHAVING COUNT(*) >= 3 AND AVG(e.grade_points) >= 3.5\nORDER BY avg_grade_points DESC, s.name;",
+      "expected": {
+        "columns": [
+          "name",
+          "courses_completed",
+          "avg_grade_points"
+        ],
+        "rows": [
+          [
+            "Ava Chen",
+            4,
+            3.93
+          ],
+          [
+            "Emma Rossi",
+            4,
+            3.85
+          ],
+          [
+            "Hana Sato",
+            4,
+            3.68
+          ],
+          [
+            "Chloe Martin",
+            3,
+            3.67
+          ]
+        ]
+      }
+    },
+    {
+      "id": "q5",
+      "title": "Top student per course (window function)",
+      "points": 4,
+      "prompt": "For each course, find the student(s) with the highest grade_points among completed enrollments. If several students tie for the top grade, include all of them. Return course_code, name and grade_points, sorted by course_code, then name.",
+      "skills": "CTE, RANK() OVER (PARTITION BY ...)",
+      "ordered": true,
+      "hint_sql": "WITH ranked AS (\n    SELECT c.course_code, s.name, e.grade_points,\n           RANK() OVER (PARTITION BY e.course_id\n                        ORDER BY e.grade_points DESC) AS rnk\n    FROM enrollments e\n    JOIN students s ON s.student_id = e.student_id\n    JOIN courses  c ON c.course_id  = e.course_id\n    WHERE e.grade_points IS NOT NULL\n)\nSELECT course_code, name, grade_points\nFROM ranked\nWHERE rnk = 1\nORDER BY course_code, name;",
+      "expected": {
+        "columns": [
+          "course_code",
+          "name",
+          "grade_points"
+        ],
+        "rows": [
+          [
+            "CS 516",
+            "Ben Okafor",
+            3.7
+          ],
+          [
+            "CS 571",
+            "George Liu",
+            3
+          ],
+          [
+            "ENV 761",
+            "Chloe Martin",
+            3.7
+          ],
+          [
+            "ENV 765",
+            "Chloe Martin",
+            4
+          ],
+          [
+            "IDS 702",
+            "Ava Chen",
+            4
+          ],
+          [
+            "IDS 703",
+            "Ava Chen",
+            4
+          ],
+          [
+            "IDS 705",
+            "Hana Sato",
+            4
+          ],
+          [
+            "STA 602",
+            "Ava Chen",
+            4
+          ],
+          [
+            "STA 602",
+            "Emma Rossi",
+            4
+          ],
+          [
+            "STA 610",
+            "Emma Rossi",
+            4
+          ]
+        ]
+      }
+    }
+  ]
+}

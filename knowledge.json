@@ -1,0 +1,68 @@
+{
+  "semantics": [
+    {
+      "id": "sem-completed",
+      "text": "A course is completed when enrollments.grade_points IS NOT NULL. grade_points IS NULL means the student is still taking the course (in progress). Averages and grade questions should only use completed enrollments."
+    },
+    {
+      "id": "sem-grade-scale",
+      "text": "grade_points is on a 0.0 to 4.0 scale: 4.0 = A, 3.7 = A-, 3.3 = B+, 3.0 = B, 2.7 = B-. A high grade means grade_points of 3.7 or more. GPA means AVG(grade_points) over completed enrollments."
+    },
+    {
+      "id": "sem-terms",
+      "text": "enrollments.term is a text label such as 'Fall 2025', 'Spring 2026' or 'Fall 2026'. The current term is 'Fall 2026'; all Fall 2026 enrollments are still in progress. Filter terms with an exact string match, e.g. term = 'Fall 2026'."
+    },
+    {
+      "id": "sem-courses",
+      "text": "A course is identified for people by courses.course_code, for example 'IDS 706' or 'STA 602' (department, a space, then the number). courses.department is the prefix: IDS, STA, CS or ENV. courses.credits is the number of credit hours."
+    },
+    {
+      "id": "sem-programs",
+      "text": "students.program is the degree program: 'MIDS', 'MEM', 'MS Stats' or 'MEng'. students.start_year is the year the student started the program (cohort), e.g. 2025."
+    },
+    {
+      "id": "sem-joins",
+      "text": "enrollments links students and courses: enrollments.student_id = students.student_id and enrollments.course_id = courses.course_id. To get a student's name or a course_code next to an enrollment, join through enrollments."
+    },
+    {
+      "id": "sem-ties",
+      "text": "When a question asks for the top or highest value per group and says ties should be included, use RANK() OVER (PARTITION BY ... ORDER BY ... DESC) and keep rank = 1. ROW_NUMBER() would drop tied rows."
+    },
+    {
+      "id": "sem-output",
+      "text": "Answers are graded by comparing result rows, so return exactly the columns the question asks for, in that order, and always add the ORDER BY the question describes. Round averages with ROUND(AVG(x), 2) when asked."
+    }
+  ],
+  "examples": [
+    {
+      "id": "ex-courses-dept",
+      "question": "List the course_code and title of every STA course, sorted by course_code.",
+      "sql": "SELECT course_code, title\nFROM courses\nWHERE department = 'STA'\nORDER BY course_code;"
+    },
+    {
+      "id": "ex-count-program",
+      "question": "How many students are in each program? Show program and student_count, largest first.",
+      "sql": "SELECT program, COUNT(*) AS student_count\nFROM students\nGROUP BY program\nORDER BY student_count DESC, program;"
+    },
+    {
+      "id": "ex-join-term",
+      "question": "Which courses did Ava Chen take in Spring 2026? Return course_code and grade_points.",
+      "sql": "SELECT c.course_code, e.grade_points\nFROM enrollments e\nJOIN students s ON s.student_id = e.student_id\nJOIN courses  c ON c.course_id  = e.course_id\nWHERE s.name = 'Ava Chen' AND e.term = 'Spring 2026'\nORDER BY c.course_code;"
+    },
+    {
+      "id": "ex-having",
+      "question": "Which courses have more than 3 enrollments in total? Show course_code and enrollment_count.",
+      "sql": "SELECT c.course_code, COUNT(*) AS enrollment_count\nFROM enrollments e\nJOIN courses c ON c.course_id = e.course_id\nGROUP BY c.course_code\nHAVING COUNT(*) > 3\nORDER BY enrollment_count DESC, c.course_code;"
+    },
+    {
+      "id": "ex-avg-course",
+      "question": "What is the average grade_points for each course among completed enrollments? Round to 2 decimals.",
+      "sql": "SELECT c.course_code, ROUND(AVG(e.grade_points), 2) AS avg_grade\nFROM enrollments e\nJOIN courses c ON c.course_id = e.course_id\nWHERE e.grade_points IS NOT NULL\nGROUP BY c.course_code\nORDER BY c.course_code;"
+    },
+    {
+      "id": "ex-window-latest",
+      "question": "For each program, find the student(s) with the most completed courses, keeping ties.",
+      "sql": "WITH counts AS (\n    SELECT s.program, s.name, COUNT(*) AS n,\n           RANK() OVER (PARTITION BY s.program ORDER BY COUNT(*) DESC) AS rnk\n    FROM enrollments e\n    JOIN students s ON s.student_id = e.student_id\n    WHERE e.grade_points IS NOT NULL\n    GROUP BY s.program, s.student_id, s.name\n)\nSELECT program, name, n AS completed_courses\nFROM counts\nWHERE rnk = 1\nORDER BY program, name;"
+    }
+  ]
+}

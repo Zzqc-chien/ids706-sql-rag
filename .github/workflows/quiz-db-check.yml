@@ -1,0 +1,55 @@
+name: Quiz DB check
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:          # "Run workflow" button in the Actions tab
+  schedule:
+    - cron: "17 13 * * 1,4"   # Mon + Thu: keeps the free Supabase project from pausing
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out code
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      - name: Unit tests (no database)
+        run: python -m pytest -q
+
+      - name: Check quiz against the live database
+        env:
+          # Values come from Settings -> Secrets and variables -> Actions.
+          # No password is ever written in this file.
+          DB_HOST: ${{ secrets.DB_HOST }}
+          DB_PORT: "5432"
+          DB_NAME: postgres
+          DB_SSLMODE: require
+          DB_READER_USER: ${{ secrets.DB_READER_USER }}
+          DB_READER_PASSWORD: ${{ secrets.DB_READER_PASSWORD }}
+          DB_APP_USER: ${{ secrets.DB_APP_USER }}
+          DB_APP_PASSWORD: ${{ secrets.DB_APP_PASSWORD }}
+        run: python scripts/check_quiz.py
+
+      - name: Check RAG pipeline (retrieval + LLM)
+        env:
+          DB_HOST: ${{ secrets.DB_HOST }}
+          DB_PORT: "5432"
+          DB_NAME: postgres
+          DB_SSLMODE: require
+          DB_READER_USER: ${{ secrets.DB_READER_USER }}
+          DB_READER_PASSWORD: ${{ secrets.DB_READER_PASSWORD }}
+          LLM_API_KEY: ${{ secrets.LLM_API_KEY }}
+          LLM_BASE_URL: ${{ secrets.LLM_BASE_URL }}
+          LLM_MODEL: ${{ secrets.LLM_MODEL }}
+        run: python scripts/check_rag.py
