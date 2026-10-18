@@ -64,13 +64,13 @@ question -> ChromaDB vector search -> prompt with retrieved context -> LLM -> SQ
 ```
 
 **Knowledge in the vector DB** (`rag.py`, `knowledge.json`), 17 documents:
-- Schema: one document per table, read live from Postgres (`information_schema` + `pg_constraint`) when the app starts.
-- Business rules: e.g. "completed means grade_points IS NOT NULL", term labels, how to handle ties.
-- Few-shot examples: 6 question/SQL pairs. These are different from the quiz questions, so the answers aren't just copied.
+ Schema: one document per table, read live from Postgres (`information_schema` + `pg_constraint`) when the app starts.
+Business rules: e.g. "completed means grade_points IS NOT NULL", term labels, how to handle ties.
+Few-shot examples: 6 question/SQL pairs. These are different from the quiz questions, so the answers aren't just copied.
 
 **Retrieval:** Chroma in-memory collection with its built-in `all-MiniLM-L6-v2` embeddings (cosine distance). Each question runs two searches: the top 3 tables, then the top 6 rules/examples. The tab shows what was retrieved and the distances.
 
-**AI API:** any OpenAI-compatible chat API through the `openai` SDK. I use the Duke AI Gateway (`https://litellm.oit.duke.edu/v1`). The model is set with `LLM_MODEL`.
+**AI API:** any OpenAI-compatible chat API through the `openai` SDK. I use Google Gemini (`gemini-3.8-flash`) through its OpenAI-compatible endpoint. The model is set with `LLM_MODEL`.
 
 **Extra credit:** the generated SQL runs automatically as `quiz_reader` (read-only transaction, 5 s timeout). The app shows the result table, and for quiz questions it says whether the result matches the expected answer. Every AI run is also written to the audit log as `ai:<question>`.
 
