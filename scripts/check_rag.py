@@ -30,7 +30,7 @@ def main() -> int:
 
     use_llm = bool(quizlib.setting("LLM_API_KEY"))
     client = rag.llm_client() if use_llm else None
-    correct = 0
+    correct = generated = 0
     for q in quizlib.load_questions():
         context = rag.retrieve(collection, q["prompt"])
         top = ", ".join(f"{c['id']} ({c['distance']})" for c in context)
@@ -40,7 +40,12 @@ def main() -> int:
             return 1
         if not use_llm:
             continue
-        sql = rag.generate_sql(q["prompt"], context, client)["sql"]
+        try:
+            sql = rag.generate_sql(q["prompt"], context, client)["sql"]
+            generated += 1
+        except Exception as exc:  # e.g. the API's per-minute limit
+            print(f"      LLM call failed: {str(exc).strip().splitlines()[0][:150]}")
+            continue
         try:
             _, rows = quizlib.run_readonly(sql)
             ok = quizlib.results_match(rows, q["expected"]["rows"], q.get("ordered", False))
@@ -52,8 +57,11 @@ def main() -> int:
 
     print()
     if use_llm:
-        print(f"LLM model {quizlib.setting('LLM_MODEL', 'gpt-4o-mini')}: "
-              f"{correct}/{len(quizlib.load_questions())} questions correct")
+        print(f"LLM model {quizlib.setting('LLM_MODEL', 'gpt-4o-mini')}: generated SQL for "
+              f"{generated}/{len(quizlib.load_questions())} questions, {correct} correct")
+        if generated == 0:
+            print("FAIL  the LLM did not answer any question")
+            return 1
     else:
         print("LLM_API_KEY not set: checked retrieval only")
     print("RAG pipeline OK.")

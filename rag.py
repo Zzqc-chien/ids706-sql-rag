@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import json
 import re
+import time
 from pathlib import Path
 
 import chromadb
@@ -153,16 +154,30 @@ def llm_client():
     return OpenAI(api_key=key, base_url=base_url, timeout=60)
 
 
-def generate_sql(question: str, context: list[dict], client=None) -> dict:
+def _retry_delay(exc, default: float = 15.0) -> float:
+    """Seconds to wait after a 429, taken from the error text when it says."""
+    match = re.search(r"retry in ([0-9.]+)s", str(exc))
+    return min(float(match.group(1)) + 1, 60) if match else default
+
+
+def generate_sql(question: str, context: list[dict], client=None, retries: int = 2) -> dict:
     client = client or llm_client()
     model = quizlib.setting("LLM_MODEL", "gpt-4o-mini")
     prompt = build_prompt(question, context)
-    resp = client.chat.completions.create(
-        model=model,
-        temperature=0,
-        messages=[{"role": "system", "content": SYSTEM_PROMPT},
-                  {"role": "user", "content": prompt}],
-    )
+    for attempt in range(retries + 1):
+        try:
+            resp = client.chat.completions.create(
+                model=model,
+                temperature=0,
+                messages=[{"role": "system", "content": SYSTEM_PROMPT},
+                          {"role": "user", "content": prompt}],
+            )
+            break
+        except Exception as exc:
+            # Free API tiers allow only a few requests per minute: wait and retry on 429.
+            if getattr(exc, "status_code", None) != 429 or attempt == retries:
+                raise
+            time.sleep(_retry_delay(exc))
     raw = resp.choices[0].message.content or ""
     return {"sql": extract_sql(raw), "raw": raw, "model": model, "prompt": prompt}
 
