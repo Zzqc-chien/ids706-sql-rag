@@ -126,3 +126,11 @@ def test_all_models_out_of_quota_raises_friendly_error(monkeypatch):
         assert "quota" in str(exc).lower()
     else:
         raise AssertionError("expected QuotaExhausted")
+
+
+def test_config_errors_are_told_apart_from_temporary_ones():
+    assert rag.is_config_error(SimpleNamespace(status_code=401))
+    assert rag.is_config_error(SimpleNamespace(status_code=404))
+    assert not rag.is_config_error(SimpleNamespace(status_code=429))
+    assert not rag.is_config_error(TimeoutError("Request timed out."))
+    assert not rag.is_config_error(rag.QuotaExhausted("quota"))

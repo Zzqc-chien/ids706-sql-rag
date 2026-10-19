@@ -151,7 +151,14 @@ def llm_client():
     if not key:
         raise RuntimeError("Missing setting LLM_API_KEY.")
     base_url = quizlib.setting("LLM_BASE_URL") or None
-    return OpenAI(api_key=key, base_url=base_url, timeout=60)
+    timeout = float(quizlib.setting("LLM_TIMEOUT", "90"))
+    return OpenAI(api_key=key, base_url=base_url, timeout=timeout, max_retries=1)
+
+
+def is_config_error(exc) -> bool:
+    """True for errors that mean the setup is wrong (bad key, bad model name),
+    False for temporary ones (timeout, rate limit, server error)."""
+    return getattr(exc, "status_code", None) in (400, 401, 403, 404)
 
 
 class QuotaExhausted(RuntimeError):

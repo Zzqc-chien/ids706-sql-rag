@@ -34,7 +34,7 @@ def main() -> int:
     # (free tiers allow ~20 calls per model per day; the website needs them more).
     limit = int(quizlib.setting("RAG_CHECK_LLM_LIMIT", "0") or 0)
     correct = generated = tried = 0
-    quota_hit = False
+    temporary = False   # timeouts, rate limits, server errors: not our bug
     for q in quizlib.load_questions():
         context = rag.retrieve(collection, q["prompt"])
         top = ", ".join(f"{c['id']} ({c['distance']})" for c in context)
@@ -48,12 +48,10 @@ def main() -> int:
         try:
             sql = rag.generate_sql(q["prompt"], context, client)["sql"]
             generated += 1
-        except rag.QuotaExhausted as exc:
-            quota_hit = True
-            print(f"      skipped: {exc}")
-            continue
         except Exception as exc:
             print(f"      LLM call failed: {str(exc).strip().splitlines()[0][:150]}")
+            if not rag.is_config_error(exc):
+                temporary = True
             continue
         try:
             _, rows = quizlib.run_readonly(sql)
@@ -68,10 +66,11 @@ def main() -> int:
     if use_llm:
         print(f"LLM model {quizlib.setting('LLM_MODEL', 'gpt-4o-mini')}: generated SQL for "
               f"{generated}/{tried} questions tried, {correct} correct")
-        if generated == 0 and quota_hit:
-            print("NOTE  API quota used up right now; retrieval was still checked")
+        if generated == 0 and temporary:
+            print("NOTE  the AI API was slow or out of quota right now (temporary); "
+                  "retrieval was still checked")
         elif generated == 0:
-            print("FAIL  the LLM did not answer any question")
+            print("FAIL  the LLM call failed: check LLM_API_KEY, LLM_BASE_URL and LLM_MODEL")
             return 1
     else:
         print("LLM_API_KEY not set: checked retrieval only")
