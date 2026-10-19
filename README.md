@@ -76,13 +76,19 @@ Few-shot examples: 6 question/SQL pairs. These are different from the quiz quest
 
 CI also runs `scripts/check_rag.py`. It builds the index, runs retrieval for all 5 questions, generates SQL with the API key from GitHub Secrets, and prints how many came out correct.
 
-Basic: a question and its generated SQL
+### Screenshots
 
-![question and generated SQL](docs/rag-basic.png)
+1. A question from the quiz (Q3) in the Ask AI tab
 
-Extra credit: executed SQL, result table, and validation
+![question](docs/rag-1-question.png)
 
-![executed SQL, result table and validation](docs/rag-extra.png)
+2. What ChromaDB retrieved for it, with cosine distances
+
+![retrieved context](docs/rag-2-retrieval.png)
+
+3. The generated SQL, the result table (run with the read-only role), and the validation result (extra credit)
+
+![generated SQL, result and validation](docs/rag-3-sql-result.png)
 
 ## Running it yourself
 
