@@ -276,6 +276,8 @@ def ai_generate(question_text: str, quiz_question: dict | None) -> None:
             out.update(cached_answer(question_text.strip()))
     except rag.QuotaExhausted as exc:
         out["error"] = str(exc)
+        st.session_state.ai_result = out
+        return
     except Exception as exc:
         out["error"] = f"AI step failed: {str(exc).strip().splitlines()[0][:300]}"
         st.session_state.ai_result = out

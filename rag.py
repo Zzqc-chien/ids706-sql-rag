@@ -144,25 +144,50 @@ def extract_sql(text: str) -> str:
     return sql.strip()
 
 
-def llm_client():
+def _make_client(key: str, base_url: str | None):
     from openai import OpenAI
 
+    timeout = float(quizlib.setting("LLM_TIMEOUT", "45"))
+    # max_retries=0: we handle retries and fallbacks ourselves below.
+    return OpenAI(api_key=key, base_url=base_url or None, timeout=timeout, max_retries=0)
+
+
+def llm_targets() -> list[tuple[object, str]]:
+    """(client, model) pairs to try, in order.
+
+    1. LLM_MODEL, then LLM_FALLBACK_MODELS, on the main API (LLM_API_KEY / LLM_BASE_URL)
+    2. LLM2_MODEL on a backup API (LLM2_API_KEY / LLM2_BASE_URL), if configured
+    """
     key = quizlib.setting("LLM_API_KEY")
     if not key:
         raise RuntimeError("Missing setting LLM_API_KEY.")
-    base_url = quizlib.setting("LLM_BASE_URL") or None
-    timeout = float(quizlib.setting("LLM_TIMEOUT", "90"))
-    return OpenAI(api_key=key, base_url=base_url, timeout=timeout, max_retries=1)
+    main = _make_client(key, quizlib.setting("LLM_BASE_URL"))
+    targets = [(main, m) for m in models_to_try()]
+    key2, model2 = quizlib.setting("LLM2_API_KEY"), quizlib.setting("LLM2_MODEL")
+    if key2 and model2:
+        targets.append((_make_client(key2, quizlib.setting("LLM2_BASE_URL")), model2))
+    return targets
+
+
+def llm_client():
+    """The main API client (kept for scripts and tests)."""
+    return llm_targets()[0][0]
+
+
+class QuotaExhausted(RuntimeError):
+    """No configured model could answer right now (quota, overload, timeout...)."""
+
+    def __init__(self, message: str, config_error: bool = False):
+        super().__init__(message)
+        self.config_error = config_error
 
 
 def is_config_error(exc) -> bool:
     """True for errors that mean the setup is wrong (bad key, bad model name),
-    False for temporary ones (timeout, rate limit, server error)."""
+    False for temporary ones (timeout, rate limit, overloaded server)."""
+    if isinstance(exc, QuotaExhausted):
+        return exc.config_error
     return getattr(exc, "status_code", None) in (400, 401, 403, 404)
-
-
-class QuotaExhausted(RuntimeError):
-    """Every configured model hit its API quota."""
 
 
 def _retry_seconds(exc) -> float | None:
@@ -185,34 +210,47 @@ def models_to_try() -> list[str]:
     return [main] + [m for m in extra if m != main]
 
 
-def generate_sql(question: str, context: list[dict], client=None, retries: int = 2) -> dict:
-    """Ask the LLM for SQL.
+def generate_sql(question: str, context: list[dict], client=None, retries: int = 1) -> dict:
+    """Ask the LLM for SQL, trying each configured (API, model) in turn.
 
-    Free API tiers have per-minute and per-day limits. A short wait (per-minute
-    limit) is retried on the same model; a long one (daily limit) moves on to
-    the next model in LLM_FALLBACK_MODELS, since each model has its own quota.
+    Free API tiers fail in several temporary ways: per-minute limits (429 with a
+    short wait: wait and retry), daily limits (429 with a long wait: next model),
+    overload (503) and timeouts (retry once, then next model). If one target is
+    misconfigured (401/404) we still try the others.
     """
-    client = client or llm_client()
+    targets = [(client, m) for m in models_to_try()] if client is not None else llm_targets()
     prompt = build_prompt(question, context)
     messages = [{"role": "system", "content": SYSTEM_PROMPT},
                 {"role": "user", "content": prompt}]
-    for model in models_to_try():
+    problems = []
+    for api, model in targets:
         for attempt in range(retries + 1):
             try:
-                resp = client.chat.completions.create(model=model, temperature=0, messages=messages)
+                resp = api.chat.completions.create(model=model, temperature=0, messages=messages)
             except Exception as exc:
-                if getattr(exc, "status_code", None) != 429:
-                    raise
-                wait = _retry_seconds(exc)
-                if (wait is not None and wait > 60) or "PerDay" in str(exc) or attempt == retries:
-                    break                      # this model is out of quota: try the next one
-                time.sleep((wait or 10) + 1)
+                status = getattr(exc, "status_code", None)
+                problems.append((model, status, is_config_error(exc)))
+                if is_config_error(exc):
+                    break                                  # wrong key/model: next target
+                if status == 429:
+                    wait = _retry_seconds(exc)
+                    if (wait is not None and wait > 60) or "PerDay" in str(exc):
+                        break                              # daily quota: next target
+                    if attempt < retries:
+                        time.sleep((wait or 10) + 1)
+                    continue
+                if attempt < retries:                      # 5xx, timeout, connection error
+                    time.sleep(2)
                 continue
             raw = resp.choices[0].message.content or ""
             return {"sql": extract_sql(raw), "raw": raw, "model": model, "prompt": prompt}
-    raise QuotaExhausted(
-        "The AI API quota is used up for now (free tier limit) for: " + ", ".join(models_to_try())
-        + ". Please try again later.")
+    all_config = bool(problems) and all(c for _, _, c in problems)
+    tried = ", ".join(sorted({m for m, _, _ in problems}))
+    if all_config:
+        raise QuotaExhausted(f"The AI API rejected the request for {tried}: check the API key "
+                             "and model name settings.", config_error=True)
+    raise QuotaExhausted(f"The AI service is busy or out of free quota right now ({tried}). "
+                         "Please try again in a minute.")
 
 
 def answer(question: str, collection, client=None, k: int = TOP_K) -> dict:
