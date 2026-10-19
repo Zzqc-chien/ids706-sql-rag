@@ -249,6 +249,13 @@ def knowledge_index():
     return rag.build_collection(docs)
 
 
+@st.cache_data(ttl=24 * 3600, show_spinner=False)
+def cached_answer(question_text: str) -> dict:
+    """Same question -> same retrieval and same prompt (temperature 0), so reuse
+    the answer for a day. This keeps the free API quota for new questions."""
+    return rag.answer(question_text, knowledge_index())
+
+
 def ai_generate(question_text: str, quiz_question: dict | None) -> None:
     user = current_user()
     if not user:
@@ -266,9 +273,11 @@ def ai_generate(question_text: str, quiz_question: dict | None) -> None:
     out = {"question": question_text, "quiz_id": quiz_question["id"] if quiz_question else None}
     try:
         with st.spinner("Retrieving context and asking the model..."):
-            out.update(rag.answer(question_text, knowledge_index()))
+            out.update(cached_answer(question_text.strip()))
+    except rag.QuotaExhausted as exc:
+        out["error"] = str(exc)
     except Exception as exc:
-        out["error"] = f"AI step failed: {exc}"
+        out["error"] = f"AI step failed: {str(exc).strip().splitlines()[0][:300]}"
         st.session_state.ai_result = out
         return
 

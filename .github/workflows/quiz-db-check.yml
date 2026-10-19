@@ -52,4 +52,6 @@ jobs:
           LLM_API_KEY: ${{ secrets.LLM_API_KEY }}
           LLM_BASE_URL: ${{ secrets.LLM_BASE_URL }}
           LLM_MODEL: ${{ secrets.LLM_MODEL }}
+          LLM_FALLBACK_MODELS: ${{ secrets.LLM_FALLBACK_MODELS }}
+          RAG_CHECK_LLM_LIMIT: "1"     # one API call per run, to save the free quota
         run: python scripts/check_rag.py

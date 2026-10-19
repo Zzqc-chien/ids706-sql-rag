@@ -72,6 +72,8 @@ Few-shot examples: 6 question/SQL pairs. These are different from the quiz quest
 
 **AI API:** any OpenAI-compatible chat API through the `openai` SDK. I use Google Gemini (`gemini-3.8-flash`) through its OpenAI-compatible endpoint. The model is set with `LLM_MODEL`.
 
+The free Gemini tier only allows a few requests per minute and a small number per day for each model, so the app caches the answer to a repeated question for 24 hours, waits and retries on a per-minute limit, and switches to the next model in `LLM_FALLBACK_MODELS` when one model's daily quota runs out. CI makes only one API call per run.
+
 **Extra credit:** the generated SQL runs automatically as `quiz_reader` (read-only transaction, 5 s timeout). The app shows the result table, and for quiz questions it says whether the result matches the expected answer. Every AI run is also written to the audit log as `ai:<question>`.
 
 CI also runs `scripts/check_rag.py`. It builds the index, runs retrieval for all 5 questions, generates SQL with the API key from GitHub Secrets, and prints how many came out correct.
@@ -107,7 +109,7 @@ CI also runs `scripts/check_rag.py`. It builds the index, runs retrieval for all
    python scripts/check_quiz.py   # should print "All checks passed."
    streamlit run app.py
    ```
-6. For CI, add these repo secrets: `DB_HOST`, `DB_READER_USER`, `DB_READER_PASSWORD`, `DB_APP_USER`, `DB_APP_PASSWORD`, `LLM_API_KEY`, `LLM_BASE_URL`, `LLM_MODEL`.
+6. For CI, add these repo secrets: `DB_HOST`, `DB_READER_USER`, `DB_READER_PASSWORD`, `DB_APP_USER`, `DB_APP_PASSWORD`, `LLM_API_KEY`, `LLM_BASE_URL`, `LLM_MODEL`, and optionally `LLM_FALLBACK_MODELS`.
 7. To deploy, create an app on share.streamlit.io from this repo (`app.py`) and paste the `.env` values into its Secrets, in TOML format.
 
 If you change the data or questions, re-run `init.sql` and then run `python scripts/check_quiz.py --write` to refresh the expected answers.

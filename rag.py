@@ -154,32 +154,58 @@ def llm_client():
     return OpenAI(api_key=key, base_url=base_url, timeout=60)
 
 
-def _retry_delay(exc, default: float = 15.0) -> float:
-    """Seconds to wait after a 429, taken from the error text when it says."""
-    match = re.search(r"retry in ([0-9.]+)s", str(exc))
-    return min(float(match.group(1)) + 1, 60) if match else default
+class QuotaExhausted(RuntimeError):
+    """Every configured model hit its API quota."""
+
+
+def _retry_seconds(exc) -> float | None:
+    """How long the API asked us to wait after a 429, in seconds."""
+    text = str(exc)
+    match = re.search(r"retryDelay['\"]?\s*:\s*['\"](\d+(?:\.\d+)?)s", text)
+    if match:
+        return float(match.group(1))
+    match = re.search(r"retry in (?:(\d+)h)?(?:(\d+)m)?([0-9.]+)s", text)
+    if match:
+        h, m, sec = match.groups()
+        return int(h or 0) * 3600 + int(m or 0) * 60 + float(sec)
+    return None
+
+
+def models_to_try() -> list[str]:
+    """LLM_MODEL first, then any LLM_FALLBACK_MODELS (comma separated)."""
+    main = quizlib.setting("LLM_MODEL", "gpt-4o-mini")
+    extra = [m.strip() for m in (quizlib.setting("LLM_FALLBACK_MODELS") or "").split(",") if m.strip()]
+    return [main] + [m for m in extra if m != main]
 
 
 def generate_sql(question: str, context: list[dict], client=None, retries: int = 2) -> dict:
+    """Ask the LLM for SQL.
+
+    Free API tiers have per-minute and per-day limits. A short wait (per-minute
+    limit) is retried on the same model; a long one (daily limit) moves on to
+    the next model in LLM_FALLBACK_MODELS, since each model has its own quota.
+    """
     client = client or llm_client()
-    model = quizlib.setting("LLM_MODEL", "gpt-4o-mini")
     prompt = build_prompt(question, context)
-    for attempt in range(retries + 1):
-        try:
-            resp = client.chat.completions.create(
-                model=model,
-                temperature=0,
-                messages=[{"role": "system", "content": SYSTEM_PROMPT},
-                          {"role": "user", "content": prompt}],
-            )
-            break
-        except Exception as exc:
-            # Free API tiers allow only a few requests per minute: wait and retry on 429.
-            if getattr(exc, "status_code", None) != 429 or attempt == retries:
-                raise
-            time.sleep(_retry_delay(exc))
-    raw = resp.choices[0].message.content or ""
-    return {"sql": extract_sql(raw), "raw": raw, "model": model, "prompt": prompt}
+    messages = [{"role": "system", "content": SYSTEM_PROMPT},
+                {"role": "user", "content": prompt}]
+    for model in models_to_try():
+        for attempt in range(retries + 1):
+            try:
+                resp = client.chat.completions.create(model=model, temperature=0, messages=messages)
+            except Exception as exc:
+                if getattr(exc, "status_code", None) != 429:
+                    raise
+                wait = _retry_seconds(exc)
+                if (wait is not None and wait > 60) or "PerDay" in str(exc) or attempt == retries:
+                    break                      # this model is out of quota: try the next one
+                time.sleep((wait or 10) + 1)
+                continue
+            raw = resp.choices[0].message.content or ""
+            return {"sql": extract_sql(raw), "raw": raw, "model": model, "prompt": prompt}
+    raise QuotaExhausted(
+        "The AI API quota is used up for now (free tier limit) for: " + ", ".join(models_to_try())
+        + ". Please try again later.")
 
 
 def answer(question: str, collection, client=None, k: int = TOP_K) -> dict:

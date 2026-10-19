@@ -83,3 +83,46 @@ def test_generate_sql_sends_retrieved_context():
     out = rag.generate_sql("List student names", context, client=fake)
     assert out["sql"] == "SELECT name FROM students;"
     assert "Table students has columns: name." in seen["messages"][1]["content"]
+
+
+class _Quota429(Exception):
+    status_code = 429
+
+    def __str__(self):
+        return ("Error code: 429 - Quota exceeded for metric generate_content_free_tier_requests "
+                "quotaId GenerateRequestsPerDayPerProjectPerModel-FreeTier. "
+                "Please retry in 22h50m33.4s. 'retryDelay': '82233s'")
+
+
+def test_daily_quota_falls_back_to_next_model(monkeypatch):
+    monkeypatch.setenv("LLM_MODEL", "model-a")
+    monkeypatch.setenv("LLM_FALLBACK_MODELS", "model-b")
+    calls = []
+
+    def create(**kwargs):
+        calls.append(kwargs["model"])
+        if kwargs["model"] == "model-a":
+            raise _Quota429()
+        msg = SimpleNamespace(content="```sql\nSELECT 1;\n```")
+        return SimpleNamespace(choices=[SimpleNamespace(message=msg)])
+
+    fake = SimpleNamespace(chat=SimpleNamespace(completions=SimpleNamespace(create=create)))
+    out = rag.generate_sql("q", [], client=fake)
+    assert calls == ["model-a", "model-b"]      # no sleeping on a daily limit
+    assert out["model"] == "model-b"
+
+
+def test_all_models_out_of_quota_raises_friendly_error(monkeypatch):
+    monkeypatch.setenv("LLM_MODEL", "model-a")
+    monkeypatch.delenv("LLM_FALLBACK_MODELS", raising=False)
+
+    def create(**kwargs):
+        raise _Quota429()
+
+    fake = SimpleNamespace(chat=SimpleNamespace(completions=SimpleNamespace(create=create)))
+    try:
+        rag.generate_sql("q", [], client=fake)
+    except rag.QuotaExhausted as exc:
+        assert "quota" in str(exc).lower()
+    else:
+        raise AssertionError("expected QuotaExhausted")
